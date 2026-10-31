@@ -143,11 +143,15 @@ function routeRequest(
 
   // Handlers deal with their own errors. This is a last safety net so a surprise never crashes the server.
   route.handler(request, response, store).catch((error: unknown) => {
-    logger.error('Unhandled error in route handler', { reason: describeError(error) });
+    // Once the reply has started it is too late to send an error, so this is the only place it gets logged.
     if (response.headersSent) {
+      logger.error('Unhandled error after the response had started', {
+        reason: describeError(error),
+      });
       response.end();
       return;
     }
+    // sendErrorResponse logs the cause itself.
     sendErrorResponse(response, error);
   });
 }
@@ -261,6 +265,30 @@ function shutDownOnSignals(server: Server, database: Database.Database): void {
   });
 }
 
+// Explains in plain English why the server could not start listening, for the log.
+function describeListenProblem(error: NodeJS.ErrnoException, port: number): string {
+  if (error.code === 'EADDRINUSE') {
+    return `Port ${String(port)} is already in use. Stop the other program using it, or set a different PORT.`;
+  }
+  if (error.code === 'EACCES') {
+    return `Not allowed to use port ${String(port)}. Try a port above 1023, or set a different PORT.`;
+  }
+  return `The server could not start listening on port ${String(port)}: ${error.message}`;
+}
+
+// Handles errors from the HTTP server. If it never managed to start listening (for example the port is taken),
+// logs a clear message, closes the database and lets the process end with exit code 1 instead of a raw crash.
+function exitCleanlyIfListenFails(server: Server, port: number, database: Database.Database): void {
+  server.on('error', (error: NodeJS.ErrnoException) => {
+    logger.error(describeListenProblem(error, port), { code: error.code, port });
+
+    if (!server.listening) {
+      database.close();
+      process.exitCode = 1;
+    }
+  });
+}
+
 // Puts everything together: settings, database, event store and the listening HTTP server.
 // If the settings are invalid it logs the problems and stops without starting anything.
 function main(): void {
@@ -277,6 +305,8 @@ function main(): void {
   const server = createServer((request, response) => {
     handleRequest(request, response, store);
   });
+
+  exitCleanlyIfListenFails(server, config.PORT, database);
 
   server.listen(config.PORT, () => {
     logger.info(`Tax service listening on port ${String(config.PORT)}`, {
