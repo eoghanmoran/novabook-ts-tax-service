@@ -1,1 +1,0 @@
-# End-to-end tests: start the real HTTP server with an in-memory database and call the endpoints.
