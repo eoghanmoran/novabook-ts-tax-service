@@ -103,7 +103,8 @@ async function startServer(): Promise<RunningServer> {
 
   const child = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
     cwd: PROJECT_ROOT,
-    env: { ...process.env, PORT: String(port), DATABASE_PATH: ':memory:' },
+    // NODE_ENV is changed from "test" so the service logs its "listening" line, which we wait for below.
+    env: { ...process.env, NODE_ENV: 'e2e', PORT: String(port), DATABASE_PATH: ':memory:' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
